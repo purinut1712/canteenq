@@ -2,47 +2,84 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 
+// Import Models
 const Order = require('./models/Order');
 const User = require('./models/User'); 
+// (ถ้ามี Menu Model ก็ Import ด้วย)
+
+// Import Routers
 const menuRouter = require('./routes/menu');
 const authRouter = require('./routes/auth');  
+// ถ้าคุณแยก orders ไปที่ routes/orders.js ก็ใช้บรรทัดนี้:
+// const ordersRouter = require('./routes/orders'); 
 
 const app = express();
 
-// Middleware
-app.use(cors());
+// =========================================================
+// 1. CORS CONFIGURATION (แก้ไขสำคัญสำหรับ Deploy)
+// =========================================================
+
+// ✅ แทนที่ URL นี้ด้วย URL จริงของ Frontend Vercel ของคุณ
+const FRONTEND_URL = 'https://canteenq.vercel.app'; // <--- แก้ไขตรงนี้
+
+const allowedOrigins = [
+    FRONTEND_URL, 
+    'http://localhost:5173', // สำหรับการทดสอบในเครื่อง (ถ้าใช้ Vite)
+    'http://localhost:3000', // สำหรับการทดสอบในเครื่อง (ถ้าใช้ CRA)
+];
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    // อนุญาตถ้าไม่มี Origin (เช่น postman) หรือ Origin อยู่ในรายการที่อนุญาต
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.error('CORS blocked access from:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true, // ถ้ามีการส่ง cookie/header เช่น Authorization
+  optionsSuccessStatus: 200
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
-// MongoDB Connection (ใช้ URL เดิมที่คุณให้มา)
+// =========================================================
+// 2. MongoDB CONNECTION
+// =========================================================
 mongoose.connect(
+  // URL เดิมที่คุณใช้:
   'mongodb+srv://purinutkrut_db_user:FWrwLe27O9DvCcSI@canteenq.ukeqyuk.mongodb.net/canteenq' 
 )
 .then(() => console.log('MongoDB connected'))
-.catch(err => console.error(err));
+.catch(err => console.error('MongoDB connection error:', err));
 
-// ================== ROUTES ==================
+
+// =========================================================
+// 3. ROUTES DEFINITION
+// =========================================================
 
 // Test Route
-app.get('/', (req, res) => res.send('Backend running'));
+app.get('/', (req, res) => res.send('CanteenQ Backend running'));
 
 // Use Routers
 app.use('/api/menu', menuRouter);
 app.use('/api/auth', authRouter);  
 
-// 1. ORDERS: Fetch ALL orders (for Shop - No populate)
+// ถ้าคุณใช้ routes/orders.js ให้ uncomment บรรทัดนี้:
+// app.use('/api/orders', ordersRouter); 
+
+// (ถ้าคุณไม่ได้ใช้ ordersRouter.js และต้องการให้ API orders อยู่ใน server.js เหมือนเดิม)
+// 1. ORDERS: Fetch ALL orders (for Shop)
 app.get('/api/orders', async (req, res) => {
   try {
-    const orders = await Order
-      .find()
-      .sort({ createdAt: -1 }); 
-
+    const orders = await Order.find().sort({ createdAt: -1 }); 
     res.json(orders);
   } catch (err) {
-    console.error('Error fetching all orders:', err);
     res.status(500).json({ message: err.message });
   }
 });
-
 
 // 2. ORDERS: Customer History (Filtered by userId)
 app.get('/api/orders/customer/:userId', async (req, res) => {
@@ -50,25 +87,20 @@ app.get('/api/orders/customer/:userId', async (req, res) => {
     const orders = await Order
       .find({ userId: req.params.userId })
       .sort({ createdAt: -1 }); 
-
     res.json(orders);
   } catch (err) {
-    console.error('Error fetching customer orders:', err);
     res.status(500).json({ message: err.message });
   }
 });
 
 
-// 3. ORDERS: Create new order (Ensure userId is saved)
+// 3. ORDERS: Create new order
 app.post('/api/orders', async (req, res) => {
   try {
     const { items, userId } = req.body; 
     
-    if (!userId) {
-      return res.status(400).json({ message: 'Missing user ID for order.' }); 
-    }
-    if (!items || items.length === 0) {
-      return res.status(400).json({ message: 'Order items are required.' });
+    if (!userId || !items || items.length === 0) {
+      return res.status(400).json({ message: 'Missing user ID or order items.' }); 
     }
 
     const order = new Order({ 
@@ -78,10 +110,8 @@ app.post('/api/orders', async (req, res) => {
     });
     
     await order.save();
-    console.log('Order created:', order);
-    res.json(order);
+    res.status(201).json(order);
   } catch (err) {
-    console.error('Error creating order:', err);
     res.status(500).json({ message: err.message });
   }
 });
@@ -91,8 +121,6 @@ app.post('/api/orders', async (req, res) => {
 app.put('/api/orders/:id/status', async (req, res) => {
   try {
     const { status } = req.body;
-    if (!status) return res.status(400).json({ message: 'Status is required' });
-
     const order = await Order.findByIdAndUpdate(
       req.params.id,
       { status },
@@ -101,7 +129,6 @@ app.put('/api/orders/:id/status', async (req, res) => {
     if (!order) return res.status(404).json({ message: 'Order not found' });
     res.json(order);
   } catch (err) {
-    console.error('Error updating order status:', err);
     res.status(500).json({ message: err.message });
   }
 });
@@ -114,23 +141,15 @@ app.delete('/api/orders/:id', async (req, res) => {
     if (!order) return res.status(404).json({ message: 'Order not found' });
     res.json({ message: 'Order deleted' });
   } catch (err) {
-    console.error('Error deleting order:', err);
     res.status(500).json({ message: err.message });
   }
 });
 
-// ROUTER ENDPOINTS
-// /api/auth/* is handled in auth.js
-// /api/menu/* is handled in menu.js (CRUD)
-// /api/orders (get all, create, update status, delete) are handled above and in orders.js (ถ้าคุณแยกไฟล์ orders.js ออกมา)
 
-// ตรวจสอบ: เนื่องจากคุณมี orders.js อยู่แล้ว แต่โค้ดใน server.js ก็มี API เกี่ยวกับ orders ด้วย 
-// เพื่อให้โค้ดสะอาด ควรสลับไปใช้ orders.js ที่คุณส่งมา:
-// app.use('/api/orders', require('./routes/orders')); 
-// แต่ถ้าใช้ตามโค้ด server.js นี้ก็ทำงานได้โดยไม่ใช้ orders.js 
-// ผมขอใช้ตามโค้ด server.js นี้ก่อนเพื่อให้แน่ใจว่า API ครบถ้วน
-
-// ✅ การแก้ไขสำคัญ: ใช้ Port จาก Environment Variable
+// =========================================================
+// 4. SERVER START
+// =========================================================
+// ✅ ใช้ Port จาก Environment Variable หรือใช้ 5001 เป็น Default
 const PORT = process.env.PORT || 5001; 
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
